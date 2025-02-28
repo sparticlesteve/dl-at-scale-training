@@ -122,7 +122,6 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="base", type=str, help="name of config in YAML")
     parser.add_argument("--local_batch_size", default=None, type=int, help="local batch size")
     parser.add_argument("--num_iters", default=None, type=int, help="number of iterations")
-    parser.add_argument("--num_data_workers", default=None, type=int, help="number of data loader workers")
 
     args = parser.parse_args()
     run_num = args.run_num
@@ -130,8 +129,6 @@ if __name__ == "__main__":
 
     if args.num_iters:
         params.update({"num_iters": args.num_iters})
-    if args.num_data_workers:
-        params.update({"num_data_workers": args.num_data_workers})
     if args.local_batch_size:
         params.local_batch_size = args.local_batch_size
         params.update({"global_batch_size": args.local_batch_size})

@@ -21,7 +21,6 @@ def get_data_loader(params, files_pattern, train):
     dataloader = DataLoader(
         dataset,
         batch_size=int(params.local_batch_size),
-        num_workers=params.num_data_workers,
         shuffle=(sampler is None),
         sampler=sampler,
         worker_init_fn=worker_init,
