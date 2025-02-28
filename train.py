@@ -30,10 +30,12 @@ def train(params, args):
     val_data_loader, _ = get_data_loader(params, params.valid_data_path, train=False)
     logging.info("Data loaders initialized")
 
-    # Create model, enabling checkpointing if specified in params
+    # Create model and move to device
     model = vit.ViT(params).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.9, 0.95))
+    # Wrap the model with torch.compile for further optimizations
+    model = torch.compile(model)
 
+    optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.9, 0.95))
     logging.info("Model architecture:\n%s", model)
 
     # Learning rate scheduler (cosine annealing)
