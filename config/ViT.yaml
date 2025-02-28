@@ -45,6 +45,7 @@ short: &short_ls
   limit_nsamples: 512
   limit_nsamples_val: 128
   num_iters: 128
+  use_checkpoint: true
 
 # add optimization flags
 short_opt:
