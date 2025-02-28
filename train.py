@@ -35,7 +35,14 @@ def train(params, args):
     # Wrap the model with torch.compile for further optimizations
     model = torch.compile(model)
 
-    optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.9, 0.95))
+    # Using the built-in fused Adam optimizer for improved performance
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=params.lr,
+        betas=(0.9, 0.95),
+        fused=True  # Enable fused kernel updates to reduce overhead
+    )
+
     logging.info("Model architecture:\n%s", model)
 
     # Learning rate scheduler (cosine annealing)
