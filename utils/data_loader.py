@@ -5,7 +5,6 @@ import torch
 import random
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
-from torch.utils.data.distributed import DistributedSampler
 from torch import Tensor
 import h5py
 
@@ -14,25 +13,10 @@ def worker_init(wrk_id):
     np.random.seed(torch.utils.data.get_worker_info().seed % (2**32 - 1))
 
 
-def get_data_loader(params, files_pattern, distributed, train):
+def get_data_loader(params, files_pattern, train):
     dataset = ERA5Dataset(params, files_pattern, train)
 
-    if distributed:
-        if hasattr(params, "data_num_shards"):
-            # this is for model parallelism
-            assert hasattr(
-                params, "data_shard_id"
-            ), "please set data_num_shards and data_shard_id"
-            sampler = DistributedSampler(
-                dataset,
-                shuffle=train,
-                num_replicas=params.data_num_shards,
-                rank=params.data_shard_id,
-            )
-        else:
-            sampler = DistributedSampler(dataset, shuffle=train)
-    else:
-        sampler = None
+    sampler = None
 
     dataloader = DataLoader(
         dataset,
@@ -42,14 +26,10 @@ def get_data_loader(params, files_pattern, distributed, train):
         sampler=sampler,
         worker_init_fn=worker_init,
         drop_last=True,
-        #                            persistent_workers=train,
         pin_memory=torch.cuda.is_available(),
     )
 
-    if train:
-        return dataloader, dataset, sampler
-    else:
-        return dataloader, dataset
+    return dataloader, dataset
 
 
 class ERA5Dataset(Dataset):
