@@ -135,6 +135,8 @@ if __name__ == "__main__":
     if args.local_batch_size:
         params.local_batch_size = args.local_batch_size
         params.update({"global_batch_size": args.local_batch_size})
+    else:
+        params.local_batch_size = params.global_batch_size
 
     # Set up experiment directory and logging
     expDir = os.path.join(params.expdir, args.config, run_num)
