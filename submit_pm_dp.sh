@@ -11,7 +11,11 @@
 #SBATCH -J vit-era5
 #SBATCH -o %x-%j.out
 
-DATADIR=/pscratch/sd/s/shas1693/data/dl-at-scale-training-data
+if [[ "${NERSC_HOST}" == "muller" ]]; then
+    DATADIR=/mscratch/sd/s/sfarrell/sc24-dl-tutorial/data
+else
+    DATADIR=/pscratch/sd/s/shas1693/data/dl-at-scale-training-data
+fi
 LOGDIR=${SCRATCH}/dl-at-scale-training/logs
 mkdir -p ${LOGDIR}
 args="${@}"

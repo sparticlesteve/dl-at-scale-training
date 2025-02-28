@@ -21,10 +21,10 @@ from networks import vit
 logging_utils.config_logger()
 
 def train(params, args):
-    # Initialize distributed training if running on more than one GPU.
-    if "WORLD_SIZE" in os.environ and int(os.environ["WORLD_SIZE"]) > 1:
-        dist.init_process_group(backend='nccl')
-    # Get local rank from environment variable.
+    import torch.distributed as dist
+
+    # Use the rank from the distributed process group, if initialized.
+    rank = dist.get_rank() if dist.is_initialized() else 0
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     device = torch.device("cuda", local_rank)
     torch.cuda.set_device(device)
@@ -47,7 +47,7 @@ def train(params, args):
 
     logging.info("Model architecture:\n%s", model)
 
-    # Learning rate scheduler (cosine annealing).
+    # Set up learning rate scheduler.
     if params.lr_schedule == "cosine":
         if params.warmup > 0:
             lr_scale = lambda x: min((x + 1) / params.warmup,
@@ -63,8 +63,8 @@ def train(params, args):
 
     logging.info("Starting Training Loop...")
 
-    # Log initial loss on train and validation to TensorBoard (only on rank 0).
-    if dist.get_rank() == 0:
+    # Only rank 0 performs initial logging.
+    if rank == 0:
         model.eval()
         with torch.no_grad():
             inp, tar = next(iter(train_data_loader))
@@ -89,7 +89,7 @@ def train(params, args):
     start_time = time.time()
 
     for epoch in range(params.num_epochs):
-        # Update the epoch for the DistributedSampler to shuffle data properly.
+        # Update the sampler epoch for proper shuffling.
         if hasattr(train_data_loader.sampler, "set_epoch"):
             train_data_loader.sampler.set_epoch(epoch)
 
@@ -98,7 +98,7 @@ def train(params, args):
         start_epoch = time.time()
         model.train()
         epoch_losses = []
-        epoch_sample_count = 0  # Track number of samples processed in this epoch.
+        epoch_sample_count = 0  # Count the number of samples processed in this epoch.
 
         for data in train_data_loader:
             iters += 1
@@ -122,11 +122,11 @@ def train(params, args):
 
         epoch_time = time.time() - start_epoch
         avg_loss = np.mean(epoch_losses)
-        throughput = epoch_sample_count / epoch_time  # samples per second.
+        throughput = epoch_sample_count / epoch_time  # samples per second
 
         max_mem_mb = torch.cuda.max_memory_allocated(device) / (1024 * 1024)
 
-        if dist.get_rank() == 0:
+        if rank == 0:
             logging.info("Epoch %d: Loss = %.6f, Time = %.2f sec, Throughput = %.2f samples/sec, Max GPU Mem = %.2f MB",
                          epoch+1, avg_loss, epoch_time, throughput, max_mem_mb)
             args.tboard_writer.add_scalar("Loss/train", avg_loss, iters)
@@ -158,10 +158,13 @@ def train(params, args):
             args.tboard_writer.add_scalar("RMSE/valid", avg_val_rmse, iters)
 
     total_time = time.time() - start_time
-    if dist.get_rank() == 0:
+    if rank == 0:
         logging.info("Training completed in %.2f sec", total_time)
 
+
 if __name__ == "__main__":
+    import torch.distributed as dist
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_num", default="00", type=str, help="tag for current experiment")
     parser.add_argument("--yaml_config", default="./config/ViT.yaml", type=str, help="path to yaml config")
@@ -173,16 +176,26 @@ if __name__ == "__main__":
     run_num = args.run_num
     params = YParams(os.path.abspath(args.yaml_config), args.config)
 
-    if args.num_iters:
-        params.update({"num_iters": args.num_iters})
-    if args.local_batch_size:
-        params.local_batch_size = args.local_batch_size
-        params.update({"global_batch_size": args.local_batch_size})
+    # Determine world size and local rank from environment variables.
+    # If WORLD_SIZE > 1, initialize the distributed process group.
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    if world_size > 1:
+        dist.init_process_group(backend='nccl')
+        rank = dist.get_rank()
     else:
-        params.local_batch_size = params.global_batch_size
+        rank = 0
+
+    # Set local batch size based on provided arguments or config.
+    if args.local_batch_size is not None:
+        params.local_batch_size = args.local_batch_size
+        params.update({"global_batch_size": args.local_batch_size * world_size})
+    else:
+        # Assume global_batch_size is specified in the config.
+        params.local_batch_size = params.global_batch_size // world_size
 
     # Only rank 0 sets up experiment directories and TensorBoard logging.
-    if "WORLD_SIZE" not in os.environ or int(os.environ["WORLD_SIZE"]) <= 1 or dist.get_rank() == 0:
+    if rank == 0:
         expDir = os.path.join(params.expdir, args.config, run_num)
         if not os.path.isdir(expDir):
             os.makedirs(expDir)
@@ -194,6 +207,7 @@ if __name__ == "__main__":
         args.tboard_writer = None
 
     train(params, args)
-    if "WORLD_SIZE" not in os.environ or int(os.environ["WORLD_SIZE"]) <= 1 or dist.get_rank() == 0:
+
+    if rank == 0:
         logging.info("DONE")
 
