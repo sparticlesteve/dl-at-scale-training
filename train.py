@@ -77,15 +77,20 @@ def train(params, args):
     start_time = time.time()
 
     for epoch in range(params.num_epochs):
+        # Reset peak memory stats at the beginning of each epoch.
+        torch.cuda.reset_peak_memory_stats(device)
+
         start_epoch = time.time()
         model.train()
         epoch_losses = []
+        epoch_sample_count = 0  # Track number of samples processed this epoch
 
         for data in train_data_loader:
             iters += 1
             inp, tar = data
             inp = inp.to(device, non_blocking=True)
             tar = tar.to(device, non_blocking=True)
+            epoch_sample_count += inp.shape[0]  # Count samples in current batch
 
             optimizer.zero_grad()
             with torch.cuda.amp.autocast():
@@ -100,11 +105,19 @@ def train(params, args):
             if scheduler is not None:
                 scheduler.step()
 
-        avg_loss = np.mean(epoch_losses)
         epoch_time = time.time() - start_epoch
-        logging.info("Epoch %d: Loss = %.6f, Time = %.2f sec", epoch+1, avg_loss, epoch_time)
+        avg_loss = np.mean(epoch_losses)
+        throughput = epoch_sample_count / epoch_time  # samples per second
+
+        # Get the max memory allocated on the GPU during this epoch (in MB)
+        max_mem_mb = torch.cuda.max_memory_allocated(device) / (1024 * 1024)
+
+        logging.info("Epoch %d: Loss = %.6f, Time = %.2f sec, Throughput = %.2f samples/sec, Max GPU Mem = %.2f MB",
+                     epoch+1, avg_loss, epoch_time, throughput, max_mem_mb)
         args.tboard_writer.add_scalar("Loss/train", avg_loss, iters)
         args.tboard_writer.add_scalar("Learning Rate", optimizer.param_groups[0]["lr"], iters)
+        args.tboard_writer.add_scalar("Throughput/train", throughput, iters)
+        args.tboard_writer.add_scalar("GPU_Memory/Max", max_mem_mb, iters)
 
         # Validation
         model.eval()
