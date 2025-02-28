@@ -19,15 +19,18 @@ from networks import vit
 logging_utils.config_logger()
 
 def train(params, args):
+    # Enable cuDNN autotuner for fixed input sizes
+    torch.backends.cudnn.benchmark = True
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Initialize data loaders (assumes a simple non-distributed version)
+    # Initialize data loaders
     logging.info("Initializing data loaders")
     train_data_loader, _ = get_data_loader(params, params.train_data_path, train=True)
     val_data_loader, _ = get_data_loader(params, params.valid_data_path, train=False)
     logging.info("Data loaders initialized")
 
-    # Create model and move to device
+    # Create model, enabling checkpointing if specified in params
     model = vit.ViT(params).to(device)
     optimizer = optim.Adam(model.parameters(), lr=params.lr, betas=(0.9, 0.95))
 
@@ -44,21 +47,26 @@ def train(params, args):
     else:
         scheduler = None
 
+    # Set up AMP scaler for mixed precision training
+    scaler = torch.cuda.amp.GradScaler()
+
     logging.info("Starting Training Loop...")
 
     # Log initial loss on train and validation to TensorBoard
     model.eval()
     with torch.no_grad():
         inp, tar = next(iter(train_data_loader))
-        inp, tar = inp.to(device), tar.to(device)
-        gen = model(inp)
-        tr_loss = l2_loss(gen, tar)
+        inp, tar = inp.to(device, non_blocking=True), tar.to(device, non_blocking=True)
+        with torch.cuda.amp.autocast():
+            gen = model(inp)
+            tr_loss = l2_loss(gen, tar)
 
         inp, tar = next(iter(val_data_loader))
-        inp, tar = inp.to(device), tar.to(device)
-        gen = model(inp)
-        val_loss = l2_loss(gen, tar)
-        val_rmse = weighted_rmse(gen, tar)
+        inp, tar = inp.to(device, non_blocking=True), tar.to(device, non_blocking=True)
+        with torch.cuda.amp.autocast():
+            gen = model(inp)
+            val_loss = l2_loss(gen, tar)
+            val_rmse = weighted_rmse(gen, tar)
 
         args.tboard_writer.add_scalar("Loss/train", tr_loss.item(), 0)
         args.tboard_writer.add_scalar("Loss/valid", val_loss.item(), 0)
@@ -75,13 +83,17 @@ def train(params, args):
 
         for data in train_data_loader:
             iters += 1
-            inp, tar = map(lambda x: x.to(device), data)
+            inp, tar = data
+            inp = inp.to(device, non_blocking=True)
+            tar = tar.to(device, non_blocking=True)
 
             optimizer.zero_grad()
-            gen = model(inp)
-            loss = l2_loss(gen, tar)
-            loss.backward()
-            optimizer.step()
+            with torch.cuda.amp.autocast():
+                gen = model(inp)
+                loss = l2_loss(gen, tar)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             epoch_losses.append(loss.item())
 
@@ -101,10 +113,15 @@ def train(params, args):
         valid_steps = 0
         with torch.no_grad():
             for data in val_data_loader:
-                inp, tar = map(lambda x: x.to(device), data)
-                gen = model(inp)
-                val_losses.append(l2_loss(gen, tar).item())
-                val_rmse_total += weighted_rmse(gen, tar).cpu().numpy()[0]
+                inp, tar = data
+                inp = inp.to(device, non_blocking=True)
+                tar = tar.to(device, non_blocking=True)
+                with torch.cuda.amp.autocast():
+                    gen = model(inp)
+                    loss_val = l2_loss(gen, tar)
+                    rmse_val = weighted_rmse(gen, tar)
+                val_losses.append(loss_val.item())
+                val_rmse_total += rmse_val.cpu().numpy()[0]
                 valid_steps += 1
         avg_val_loss = np.mean(val_losses)
         avg_val_rmse = val_rmse_total / valid_steps
@@ -146,3 +163,4 @@ if __name__ == "__main__":
     params.experiment_dir = os.path.abspath(expDir)
     train(params, args)
     logging.info("DONE")
+

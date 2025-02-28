@@ -12,7 +12,6 @@ import h5py
 def worker_init(wrk_id):
     np.random.seed(torch.utils.data.get_worker_info().seed % (2**32 - 1))
 
-
 def get_data_loader(params, files_pattern, train):
     dataset = ERA5Dataset(params, files_pattern, train)
 
@@ -26,6 +25,8 @@ def get_data_loader(params, files_pattern, train):
         worker_init_fn=worker_init,
         drop_last=True,
         pin_memory=torch.cuda.is_available(),
+        num_workers=4,                # Ensure you have an appropriate number of workers.
+        persistent_workers=True       # <-- Keeps workers alive across epochs.
     )
 
     return dataloader, dataset

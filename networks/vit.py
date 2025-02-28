@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from functools import partial
 from networks.helpers import DropPath, trunc_normal_
+from torch.utils.checkpoint import checkpoint  # <-- Added for checkpointing
 
 class MLP(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.0):
@@ -119,6 +120,9 @@ class VisionTransformer(nn.Module):
         trunc_normal_(self.pos_embed, std=0.02)
         self.apply(self._init_weights)
 
+        # New: Optionally enable gradient checkpointing to reduce memory usage.
+        self.use_checkpoint = kwargs.get('use_checkpoint', False)
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=0.02)
@@ -145,7 +149,11 @@ class VisionTransformer(nn.Module):
     def forward(self, x):
         x = self.prepare_tokens(x)
         for blk in self.blocks:
-            x = blk(x)
+            if self.use_checkpoint:
+                # Checkpointing reduces memory usage by recomputing activations during backward pass.
+                x = checkpoint(blk, x)
+            else:
+                x = blk(x)
         x = self.norm(x)
         x = self.forward_head(x)
         return x
@@ -165,6 +173,8 @@ def ViT(params, **kwargs):
         drop_path_rate=float(params.dropout),
         drop_rate=float(params.dropout),
         attn_drop_rate=float(params.dropout),
+        use_checkpoint=getattr(params, 'use_checkpoint', False),  # <-- Pass checkpoint flag
         **kwargs
     )
     return model
+
