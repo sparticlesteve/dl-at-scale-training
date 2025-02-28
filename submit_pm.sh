@@ -1,7 +1,6 @@
 #!/bin/bash 
 #SBATCH -C gpu 
 #SBATCH -q shared
-#SBATCH -A dasrepo
 #SBATCH --cpus-per-task 32
 #SBATCH --gpus-per-task 1
 #SBATCH --gpu-bind none
@@ -12,7 +11,7 @@
 #SBATCH -o %x-%j.out
 
 DATADIR=/pscratch/sd/s/shas1693/data/dl-at-scale-training-data
-LOGDIR=${SCRATCH}/dl-at-scale-training/logs
+LOGDIR=${SCRATCH}/1k-scientists-ai-jam/dl-at-scale-training/logs
 mkdir -p ${LOGDIR}
 args="${@}"
 
