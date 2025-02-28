@@ -34,22 +34,35 @@ class Attention(nn.Module):
         self.q = nn.Linear(dim, dim, bias=qkv_bias)
         self.k = nn.Linear(dim, dim, bias=qkv_bias)
         self.v = nn.Linear(dim, dim, bias=qkv_bias)
+        # We keep a Dropout layer so we can pass its probability into the native function.
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
+        # x shape: (B, N, C)
         B, N, C = x.shape
-        q = self.q(x).reshape(B, N, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-        k = self.k(x).reshape(B, N, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
-        v = self.v(x).reshape(B, N, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
 
+        # Compute query, key, and value projections
+        q = self.q(x)  # shape (B, N, C)
+        k = self.k(x)
+        v = self.v(x)
+
+        # Reshape and permute to (B, num_heads, N, head_dim)
+        q = q.reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.reshape(B, N, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Scale the query
         q = q * self.scale
-        attn = (q @ k.transpose(-2, -1)).softmax(dim=-1)
-        attn = self.attn_drop(attn)
-        x = attn @ v
 
-        x = x.transpose(1, 2).reshape(B, N, C)
+        # Use PyTorch native flash attention implementation
+        attn_out = F.scaled_dot_product_attention(q, k, v,
+                                                  dropout_p=self.attn_drop.p,
+                                                  is_causal=False)
+        # attn_out has shape (B, num_heads, N, head_dim)
+        # Merge heads: transpose and reshape back to (B, N, C)
+        x = attn_out.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
